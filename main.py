@@ -56,12 +56,14 @@ if __name__ == '__main__':
     data_odom = np.loadtxt('odom.txt',dtype= 'str',skiprows=0,delimiter=",")
 
     #初始化DNN类
-    dnn = dnn.neural_network(data_odom,15000,2)
+    dnn = dnn.neural_network(data_odom,15000,20)
 
     #调用优化类 
     dnn.dnn()
 
     #结果画图
     dnn.plot()
+
+
 
 

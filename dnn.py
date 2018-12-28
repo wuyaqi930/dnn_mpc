@@ -78,26 +78,24 @@ class neural_network:
         self.loss_plot = torch.zeros(times,3) #设定了一千条数据
 
         #----------------2.3构建网络-----------------
-        class Net(torch.nn.Module):  # 继承 torch 的 Module
-    
-            #定义该神经网络：4个全连接层，每层元素128个
+        class Net(torch.nn.Module):
             def __init__(self, n_feature, n_hidden, n_output):
-                super(Net, self).__init__()     # 继承 __init__ 功能
-                # 定义每层用什么样的形式
-                self.fc1 = torch.nn.Linear(n_feature, n_hidden)   # 第一个全连接层
-                self.fc2 = torch.nn.Linear(n_hidden, n_hidden)   # 第二个全连接层
-                self.fc3 = torch.nn.Linear(n_hidden, n_hidden)   # 第三个全连接层
-                self.fc4 = torch.nn.Linear(n_hidden, n_output)   # 第四个全连接层
-    
-            #定义前向网络
+                super(Net,self).__init__()
+                self.hidden = torch.nn.Sequential(
+                    torch.nn.Linear(n_feature, n_hidden),
+                    torch.nn.LeakyReLU(),
+                    torch.nn.Linear(n_hidden, n_hidden),
+                    torch.nn.LeakyReLU(),
+                    torch.nn.Linear(n_hidden, n_hidden),
+                    torch.nn.LeakyReLU()
+                )
+                self.out = torch.nn.Linear(n_hidden, n_output)
             def forward(self, x):
-                x = F.relu(self.fc1(x))
-                x = F.relu(self.fc2(x))
-                x = F.relu(self.fc3(x))
-                x = self.fc4(x)
-                return x
+                x=self.hidden(x)
+                out =  self.out(x)
+                return out
 
-        net = Net(n_feature=5, n_hidden=512, n_output=3) 
+        net = Net(n_feature=5, n_hidden=64, n_output=3) 
 
         print(net)
 
@@ -107,18 +105,18 @@ class neural_network:
         # optimizer = torch.optim.SGD(net.parameters(), lr=0.0001)  # 传入 net 的所有参数, 学习率
 
         #使用“ADAM”进行参数优化
-        optimizer = torch.optim.Adam(net.parameters(), lr=0.00003) # 传入 net 的所有参数, 学习率
+        optimizer = torch.optim.Adam(net.parameters(), lr=0.0005) # 传入 net 的所有参数, 学习率
 
         #定义损失函数，计算均方差
         #loss_func = torch.nn.MSELoss()      # 预测值和真实值的误差计算公式 (均方差)
-        loss_func = torch.nn.L1Loss()      # 预测值和真实值的误差计算公式 (均方差)
+        loss_func = torch.nn.MSELoss()      # 预测值和真实值的误差计算公式 (均方差)
 
         #----------------2.5使用cuda进行GPU计算-----------------
         net.cuda()
         loss_func.cuda()
 
         #----------------2.6具体训练过程-----------------
-        for epoch in range(1):
+        for epoch in range(5):
             for step, (batch_x, batch_y) in enumerate(loader):
                 #产生prediction
                 prediction = net( batch_x.cuda() )     # input x and predict based on x
