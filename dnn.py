@@ -5,6 +5,7 @@ import numpy as np
 np.set_printoptions(threshold=np.inf)
 
 import torch.utils.data as Data
+from sklearn.model_selection import train_test_split
 
 
 class neural_network:
@@ -38,7 +39,7 @@ class neural_network:
         data_input[:, 2] = data_input[:, 2] *10 # 转角
         data_input[:, 4] = data_input[:, 4] *10 # 角速度
     
-        data_input = data_input # 生成输入数据
+        self.data_input_numpy = data_input # 生成输入数据
 
         # 生成输出数据 
         data_output = data_odom_extratct[2:data_size+2 ,[0,1,2] ].astype(np.float)
@@ -46,36 +47,62 @@ class neural_network:
         # 放大部分输出数据（扩大部分数据作用）
         data_output[:, 2] = data_output[:, 2] *10 # 转角
 
-        data_output = data_output #生成输出数据
+        self.data_output_numpy = data_output #生成输出数据
 
-        # ------------1.3 将numpy转化成tensor-----------
+        # ------------1.3 产生训练集和测试集----------
 
-        data_input_torch = torch.from_numpy(data_input)
-        self.data_input_float = data_input_torch.float() # 转化成浮点数(重点语句不要错过）
+        data_train, data_test, label_train, label_test = self.data_loader()
 
-        data_output_torch = torch.from_numpy(data_output)
-        self.data_output_float = data_output_torch.float() # 转化成浮点数(重点语句不要错过）
+        # ------------1.3 将numpy转化成tensor----------
+
+        #训练集
+        data_train_torch = torch.from_numpy(data_train)
+        self.data_train_torch = data_train_torch.float() # 转化成浮点数(重点语句不要错过）
+
+        data_label_torch = torch.from_numpy(label_train)
+        self.data_label_torch = data_label_torch.float() # 转化成浮点数(重点语句不要错过）
+
+        #测试集
+        data_test_torch = torch.from_numpy(data_test)
+        self.data_test_torch = data_test_torch.float() # 转化成浮点数(重点语句不要错过）
+
+        label_test_torch = torch.from_numpy(label_test)
+        self.label_test_torch = label_test_torch.float() # 转化成浮点数(重点语句不要错过）
 
 
     #----------------2.构建神经网络----------------
     def dnn(self):
 
         # ------------2.1进行批训练-----------
+
+        # ------------2.1.1载入训练集-----------
+
         # 定义数据库 （输入输出分别是之前的输入输出）
-        dataset = Data.TensorDataset(self.data_input_float, self.data_output_float) 
+        dataset_train = Data.TensorDataset(self.data_train_torch, self.data_label_torch) 
 
         # 定义数据加载器
-        loader = Data.DataLoader(dataset = dataset, batch_size = self.BATCH_SIZE, shuffle = True, num_workers = 2)
+        loader_train = Data.DataLoader(dataset = dataset_train, batch_size = self.BATCH_SIZE, shuffle = True, num_workers = 2)
+
+        # ------------2.1.2载入测试集-----------
+
+        # 定义数据库 （输入输出分别是之前的输入输出）
+        dataset_test = Data.TensorDataset(self.data_test_torch, self.label_test_torch) 
+
+        # 定义数据加载器
+        loader_test = Data.DataLoader(dataset = dataset_test, batch_size = self.BATCH_SIZE, shuffle = True, num_workers = 2)
+
 
         #------------2.2初始化部分数据-----------
         #定义迭代次数 
         times = self.data_size
 
         # 绘图：生成随机输出变量
-        self.data_plot = torch.zeros(times,3) #设定了一千条数据
+        self.error_train = torch.zeros(times,3) #设定了一千条数据
+        self.error_test = torch.zeros(times,3) #设定了一千条数据
 
         # 绘图：生成损失函数误差变量
-        self.loss_plot = torch.zeros(times,3) #设定了一千条数据
+        self.loss_train = torch.zeros(times,1) #设定了一千条数据
+        self.loss_test = torch.zeros(times,1) #设定了一千条数据
 
         #----------------2.3构建网络-----------------
         class Net(torch.nn.Module):
@@ -116,8 +143,10 @@ class neural_network:
         loss_func.cuda()
 
         #----------------2.6具体训练过程-----------------
+        
+        # 训练集
         for epoch in range(5):
-            for step, (batch_x, batch_y) in enumerate(loader):
+            for step, (batch_x, batch_y) in enumerate(loader_train):
                 #产生prediction
                 prediction = net( batch_x.cuda() )     # input x and predict based on x
 
@@ -127,34 +156,103 @@ class neural_network:
                 print ("loss")
                 print (loss)
 
+                #将误差函数画出来
+                self.loss_train[step,:] = loss 
+
                 #计算optimize
                 optimizer.zero_grad()   # clear gradients for next train
                 loss.backward()         # backpropagation, compute gradients
                 optimizer.step()        # apply gradients
 
                 #计算误差百分数,并储存在data_plot当中
-                percent = 100*(prediction - batch_y.cuda())/batch_y.cuda()
+                #percent_1 = 100*(prediction - 10*batch_y.cuda())/10*batch_y.cuda()
+                percent = prediction - batch_y.cuda() #直接计算误差大小
 
-                self.data_plot[step,:] = percent[0,:] # 取precent矩阵的第一行 (这边有个self)
+                print("error")
+                print(percent)
 
-    #----------------3.将函数误差画出来----------------
-    def plot(self):
+                self.error_train[step,:] = percent[0,:]  #设定了一千条数据
+               
+
+        # 测试集
+        for epoch in range(1):
+            for step, (batch_x, batch_y) in enumerate(loader_test):
+                #产生prediction
+                prediction = net( batch_x.cuda() )     # input x and predict based on x
+
+                #计算loss
+                loss = loss_func(prediction, batch_y.cuda())     # must be (1. nn output, 2. target)
+
+                print ("loss_测试")
+                print (loss)
+
+                #将误差函数画出来
+                self.loss_test[step,:] = loss
+
+                #直接计算误差大小
+                percent = prediction - batch_y.cuda() 
+
+                print("error")
+                print(percent)
+
+                self.error_test[step,:] = percent[0,:]
+
+    #----------------3.将函数loss画出来----------------
+    def plot_loss(self):
+
         #将数据从tensor转化成numpy
-        data_plot_numpy = self.data_plot.detach().numpy() #self 
-
-        #取每个元素的绝对值
-        data_plot_numpy_abs = np.abs(data_plot_numpy.T) #需要进行转置才能得到相关数据
-        
-        #调用sum函数，将每列数据加起来，求误差的平均数
-        average = np.sum(data_plot_numpy_abs, axis=0)/3 #要除3，表示加起来求平均
+        loss_train_numpy = self.loss_train.detach().numpy() #self 
+        loss_test_numpy = self.loss_test.detach().numpy() #self 
 
         #将误差平均值可视化
         X = np.linspace(1, self.data_size, self.data_size, endpoint=True) #self
 
         #设置XY轴的显示范围
-        plt.xlim(7000, 7500) #可能需要人为调整
-        plt.ylim(0, 50) #可能需要人为调整
+        plt.xlim(0, self.data_size/self.BATCH_SIZE) #可能需要人为调整
+        #plt.ylim(0, 50) #可能需要人为调整
 
         #绘图
-        plt.plot(X,average)
+        plt.plot(X,loss_train_numpy)
+        plt.plot(X,loss_test_numpy)
         plt.show()
+
+    #----------------3.将函数loss画出来----------------
+    def plot_error(self):
+
+        #----------------3.1训练集&测试集----------------
+        #将数据从tensor转化成numpy
+        error_train_numpy = self.error_train.detach().numpy() #self 
+        #取每个元素的绝对值
+        error_train_numpy_abs = np.abs(error_train_numpy.T) #需要进行转置才能得到相关数据
+        #调用sum函数，将每列数据加起来，求误差的平均数
+        average_train = np.sum(error_train_numpy_abs, axis=0)/3 #要除3，表示加起来求平均
+
+        #将数据从tensor转化成numpy
+        error_test_numpy = self.error_test.detach().numpy() #self 
+        #取每个元素的绝对值
+        error_test_numpy_abs = np.abs(error_test_numpy.T) #需要进行转置才能得到相关数据
+        #调用sum函数，将每列数据加起来，求误差的平均数
+        average_test = np.sum(error_test_numpy_abs, axis=0)/3 #要除3，表示加起来求平均
+
+        #----------------3.2 画图----------------
+        #将误差平均值可视化
+        X = np.linspace(1, self.data_size, self.data_size, endpoint=True) #self
+
+        #设置XY轴的显示范围
+        plt.xlim(0, self.data_size/self.BATCH_SIZE) #可能需要人为调整
+        #plt.ylim(0, 50) #可能需要人为调整
+
+        #绘图
+        plt.plot(X,average_train)
+        plt.plot(X,average_test)
+        plt.show()
+
+
+    def data_loader(self):
+        #产生训练集和测试集
+        data_train, data_test, label_train, label_test = train_test_split(self.data_input_numpy, self.data_output_numpy, test_size=0.1, random_state=42)
+
+        #将训练集和测试集返回
+        return data_train, data_test, label_train, label_test
+
+       
