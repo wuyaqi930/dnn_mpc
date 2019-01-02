@@ -1,9 +1,10 @@
 #-------------导入相关安装包-------------
+import torch
 import numpy as np
 from scipy.optimize import minimize
 import time
 import matplotlib.pyplot as plt
-
+import reload_dnn as reload #载入训练网络的package 
 
 # 定义一个模型预测控制的类 
 class MPC:
@@ -13,9 +14,13 @@ class MPC:
 
         self.x_d=x_d #将理想轨迹传入
 
+        print("self.x_d __init__")
+
+        print(self.x_d)
+
         self.x=x #将实际轨迹传入
 
-        print("self.x")
+        print("self.x __init__")
         print(self.x)
 
         self.prediction_horizon=prediction_horizon #预测范围
@@ -56,6 +61,15 @@ class MPC:
 
         #print("u")
         #print(self.u)
+    #------------初始化网络------------
+        net = reload.reload_dnn() #初始化
+
+        self.reload = net.load_dnn() #重新载入网络
+
+        #调试代码
+        #print("reload mpc") #print出来看看
+        #print(self.reload)
+
         #solution = minimize(self.objective,self.x,args=(self.x_d,self.u,self.Q,self.R),method='SLSQP',constraints=cons) #求解过程放在初始化里面就可以
 
     #------------定义目标代价函数------------
@@ -63,6 +77,9 @@ class MPC:
     def objective(self,*args):
         #args的unpack
         x,x_d,u,Q,R = args
+
+        #将x来reshape成（30,3）矩阵:原因是x被初始化成了（90*1）
+        x=np.reshape(x,(self.prediction_horizon,self.state_number) )
 
         #计算代价函数--第一部分
     
@@ -78,11 +95,27 @@ class MPC:
         return J 
     
 
-    #------------定义运动学函数------------
+    ##------------定义运动学函数------------
+    #def f(self,x,u):
+    #    #f = 2*x  # 实际函数可能需要改
+    #    f = x+u
+    #    return f
+
+    #------------定义运动学函数：用网络进行运动学估计------------
     def f(self,x,u):
         #f = 2*x  # 实际函数可能需要改
-        f = x+u
-        return f
+        
+        #将X和u合并产生
+        input= np.hstack((x,u))
+        input_torch = torch.from_numpy(input)
+        
+        #print("input")
+        #print(input_torch.float())
+
+        #调用网络进行运动学估计
+        output = self.reload(input_torch.float())
+
+        return output.detach().numpy() 
 
     # 1.输入变量符合运动学方程 （等式）
     #def constraint1(self,*args):
@@ -156,6 +189,17 @@ class MPC:
         # 求解:1.传入的优化数据是self.x 2.传入的其他数据是args 3.优化数据会传入constrains当中（非常重要）4.传入的参数都被优化了，没传入的参数没有被优化（除了x状态量）
         solution = minimize(self.objective,self.x,args=(self.x_d,self.u,self.Q,self.R),method='SLSQP',constraints=cons) # 会把初始状态导入数据
         x = solution.x 
+   
+        #将x来reshape成（10,3）矩阵
+        x=np.reshape(x,(self.prediction_horizon,self.state_number) )
+
+        print("x 最终")
+        print(x)
+
+        print("self.u")
+        print(self.u)
+
+        print("下班")
 
         return x,self.u #将控制数据和状态估计返回
 
