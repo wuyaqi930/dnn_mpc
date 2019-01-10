@@ -19,8 +19,17 @@ class plot :
         #绘图
         X = np.linspace(1, self.prediction_horizon, self.prediction_horizon, endpoint=True)
 
-        plt.plot(X,self.x,label="x")
-        plt.plot(X,self.x_d,label="x_d")
+        plt.subplot(311)
+        plt.plot(X,self.x[:,0],label="x")
+        plt.plot(X,self.x_d[:,0],label="x_d")
+
+        plt.subplot(312)
+        plt.plot(X,self.x[:,1],label="y")
+        plt.plot(X,self.x_d[:,1],label="y_d")
+        
+        plt.subplot(313)
+        plt.plot(X,self.x[:,2],label="theta")
+        plt.plot(X,self.x_d[:,2],label="theta_d")
         plt.show()
 
         return 0
