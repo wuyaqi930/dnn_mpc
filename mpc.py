@@ -1,9 +1,10 @@
+#coding=utf-8
 #-------------导入相关安装包-------------
-import torch
+#import torch
 import numpy as np
 from scipy.optimize import minimize
-import matplotlib.pyplot as plt
-import reload_dnn as reload #载入训练网络的package 
+#import matplotlib.pyplot as plt
+#import reload_dnn as reload #载入训练网络的package 
 import time #导入时间
 import datetime
 
@@ -11,15 +12,13 @@ import datetime
 class MPC:
 
     #------------1.定义数据传入函数------------
-    def __init__(self,x,x_d,prediction_horizon,state_number,input_number):
+    def __init__(self,x,x_init,x_d,prediction_horizon,state_number,input_number):
 
         self.x_d=x_d #将理想轨迹传入
 
-        print("self.x_d __init__")
-        print(self.x_d)
-
         self.x=x #将实际轨迹传入
-        #self.x[0,:] = self.x_d[10,:] #第一行数据给了一个估计数值
+
+        self.x_init=x_init #将初始轨迹传入
 
         self.prediction_horizon=prediction_horizon #预测范围
 
@@ -35,43 +34,11 @@ class MPC:
 
         self.u = np.random.rand(prediction_horizon,input_number) #初始化实际状态量（列向量）为随机数
 
-        #调试代码
-        #print("x_d")
-        #print(self.x_d)
-
-        #print("x")
-        #print(self.x)
-
-        #print("prediction_horizon")
-        #print(self.prediction_horizon)
-
-        #print("state_number")
-        #print(self.state_number)
-
-        #print("input_number")
-        #print(self.input_number)
-
-        #print("Q")
-        #print(self.Q)
-
-        #print("R")
-        #print(self.R)
-
-        #print("u")
-        #print(self.u)
-    #------------初始化网络------------
-        net = reload.reload_dnn() #初始化
-
-        self.reload = net.load_dnn() #重新载入网络
-
-        #调试代码
-        #print("reload mpc") #print出来看看
-        #print(self.reload)
-
-        #solution = minimize(self.objective,self.x,args=(self.x_d,self.u,self.Q,self.R),method='SLSQP',constraints=cons) #求解过程放在初始化里面就可以
+    #------------初始化网络------------  (调试：暂时不初始化)
+        # net = reload.reload_dnn() #初始化
+        # self.reload = net.load_dnn() #重新载入网络
 
     #------------定义目标代价函数------------
-    #def objective(self,*args):
     def objective(self,*args):
         #args的unpack
         x,x_d,u,Q,R = args
@@ -86,7 +53,7 @@ class MPC:
 
         #将每一项加起来
         sum_x=np.sum(error_x)
-       
+        
         #计算代价函数总的部分
         J = sum_x 
 
@@ -147,7 +114,7 @@ class MPC:
     # 2.初始状态达到理想数值(等式）
     def constraint2(self,*args):
         #args的unpack
-        x,x_d=args
+        x,x_init=args
 
         #将x来reshape成（10,3）矩阵
         x=np.reshape(x,(self.prediction_horizon,self.state_number) )   
@@ -159,7 +126,7 @@ class MPC:
         #取数据的size
         lenth = len(x[:,0]) # 将prediction horizon取出来
 
-        return x[0,:] - x_d[0,:] # 初始数值要为零
+        return x[0,:] - x_init # 初始数值要和初始状态相等
 
 
     # 3.最终状态达到理想数值(等式）
@@ -176,7 +143,7 @@ class MPC:
 
         #取数据的size
         lenth = len(x[:,0]) # 将prediction horizon取出来
-       
+        
         return x[lenth-1,:] - x_d[lenth-1,:] # 最终的数值要为零
 
     #------------开始进行优化------------
@@ -191,8 +158,8 @@ class MPC:
             cons.append (con)
         
         # 2.定义初始状态约束
-        con10 = {'type': 'eq', 'fun': self.constraint2,'args':(self.x_d,)} 
-        #cons.append(con10)
+        con10 = {'type': 'eq', 'fun': self.constraint2,'args':(self.x_init,)} 
+        cons.append(con10)
 
         # 3.定义最终状态约束
         con11 = {'type': 'eq', 'fun': self.constraint3,'args':(self.x_d,)} 
@@ -204,9 +171,9 @@ class MPC:
 
         # 求解:1.传入的优化数据是self.x 2.传入的其他数据是args 3.优化数据会传入constrains当中（非常重要）4.传入的参数都被优化了，没传入的参数没有被优化（除了x状态量）
         #solution = minimize(self.objective,self.x,args=(self.x_d,self.u,self.Q,self.R),method='SLSQP',constraints=cons) # 会把初始状态导入数据
-        solution = minimize(self.objective,self.x,args=(self.x_d,self.u,self.Q,self.R),method='SLSQP',constraints=cons) # 会把初始状态导入数据
+        solution = minimize(self.objective,self.x,args=(self.x_d,self.u,self.Q,self.R),method='SLSQP') # 会把初始状态导入数据
         x = solution.x 
-   
+        
         #localtime_end = time.time()
         endtime = datetime.datetime.now()
 
@@ -221,17 +188,14 @@ class MPC:
 
         #将x来reshape成（10,3）矩阵
         x=np.reshape(x,(self.prediction_horizon,self.state_number) )
+        
+        print("x理想")
+        print(self.x_d)
 
-        print("x 最终")
+        print("x最终")
         print(x)
 
         print("self.u")
         print(self.u)
 
         return x,self.u #将控制数据和状态估计返回
-
-
-
-   
-
-
