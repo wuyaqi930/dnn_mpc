@@ -111,19 +111,20 @@ class control:
 
         return x_d_once
 
-
-
+    #定义回调函数
     def callback(self,data):
         #初始化time(每30帧取1帧作为状态数据）
         if self.time % 30 == 0:
-            #1.生成此时刻的x_init、以后30秒的x_d
+            # 1.生成此时刻的x_init、以后30秒的x_d
             x_d = self.data_generate(data) #一旦接收到相应数据，调用data_generate函数,
             x= self.x
             x_init = self.x_init 
 
-            #调试代码
-            print("产生的x、x_d、x_init是")
-            print(x,x_d,x_init)
+            # #调试代码：测试数据生成
+            # print("产生的x、x_d、x_init是")
+            # print(x,x_d,x_init)
+            # print("产生的x_init为")
+            # print(x_init)
 
             #2.将data丢给MPC计算
             model_predict = mpc.MPC(x,x_init,x_d,self.prediction_horizon,self.state_number,self.input_number) #提示：x_init,x_d还没有
@@ -131,7 +132,14 @@ class control:
             #2.2求解MPC（控制量生成）
             self.x,self.u = model_predict.optimize() #将求解得出的实际状态量和实际控制量赋值给self.x,self.u
 
-            print("mpc计算成功")
+            # # 调试代码：测试MPC计算
+            # print("mpc计算成功")
+
+            # print("self.x")
+            # print(self.x)
+            # print("self.u")
+            # print(self.u)
+
 
             # #将控制信号publish出去
             # self.data_publish(self.u) # self.u是控制量
@@ -154,49 +162,27 @@ class control:
 
         #保持python活跃
         rospy.spin()
-        
 
-    ##定义发送数据的函数
-    #def data_publish(self,u):
-    #    #初始化publisher
-    #    #pub = rospy.Publisher('cmd_vel', String, queue_size=10) # topic和消息类型需要和肖岸星商量确定一下 
-    #    pub = rospy.Publisher('cmd_vel', Twist, queue_size=10) # topic和消息类型需要和肖岸星商量确定一下 
-
-    #    #初始化node
-    #    rospy.init_node('data_publish', anonymous=True)
-
-    #    #设置发送时间
-    #    rate = rospy.Rate(10) # 10hz 可能还需要调整
-    #    while not rospy.is_shutdown():
-    #        pub.publish(u) #将数据发送出去
-    #        rate.sleep() #控制频率
-
-    #定义发送数据的函数
+    #定义发送数据的函数:只发一次（可以考虑发很多次，最终要看效果如何）
     def data_publish(self,u):
         #初始化publisher
-        #pub = rospy.Publisher('cmd_vel', String, queue_size=10) # topic和消息类型需要和肖岸星商量确定一下 
         pub = rospy.Publisher('cmd_vel', Twist, queue_size=10) # topic和消息类型需要和肖岸星商量确定一下 
+        
+        #初始化twist
+        twist = Twist()
 
-        #初始化node
-        rospy.init_node('data_publish', anonymous=True)
+        # 给twist赋值
+        twist.linear.x = u[0,0] #线速度
+        twist.linear.y = 0.0
+        twist.linear.z = 0.0
 
-        #设置发送时间
-        rate = rospy.Rate(10) # 10hz 可能还需要调整
-        while not rospy.is_shutdown():
-            #定义twist
-            twist = twist()
+        twist.angular.x = 0.0 #角速度
+        twist.angular.y = 0.0
+        twist.angular.z = u[0,1]
 
-            #给twist赋值
-            twist.linear.x = u[0,0] #线速度
-            twist.linear.y = 0.0
-            twist.linear.z = 0.0
+        # print("twist")
+        # print(twist)
 
-            twist.angular.x = 0.0 #角速度
-            twist.angular.y = 0.0
-            twist.angular.z = u[0,1]
-
-            #发送twist
-            pub.publish(twist) #将数据发送出去
-
-            rate.sleep() #控制频率
+        #发送twist
+        pub.publish(twist) #将数据发送出去
 
