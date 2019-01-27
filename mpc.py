@@ -11,18 +11,13 @@ import datetime
 # 定义一个模型预测控制的类 
 class MPC:
 
-
     #------------1.定义数据传入函数------------
     def __init__(self,x,x_init,x_d,prediction_horizon,state_number,input_number):
-
         self.x_d=x_d #将理想轨迹传入
 
         self.x=x #将实际轨迹传入
 
         self.x_init=x_init #将初始轨迹传入
-
-        print("x_init")
-        print(self.x_init)
 
         self.u_init=np.zeros(2) #将控制量初始值初始化
 
@@ -42,19 +37,13 @@ class MPC:
         #self.u = np.zeros((prediction_horizon,input_number)) #初始化实际状态量（列向量）为随机数
 
         # 优化量= 状态量+控制量：将两个矩阵合并
-        self.x_plus_u = np.append(self.x,self.u,axis=1)
+        self.x_plus_u = np.append(self.x,self.u.astype(int),axis=1)
 
         # 优化量初始值 = 状态量初始值+控制量初始值：将两个矩阵合并
-        self.x_plus_u_init = np.append(self.x_init,self.u_init)
+        self.x_plus_u_init = np.append(self.x_init,self.u_init.astype(int))
 
-        # print("self.x_init")
-        # print(self.x_init)
-
-        # print("self.u_init")
-        # print(self.u_init)
-
-        # print("self.x_plus_u_init")
-        # print(self.x_plus_u_init)
+        # 最终状态的误差数值
+        self.final_error = 0.2
 
 
     #------------初始化网络------------  (调试：暂时不初始化)
@@ -137,50 +126,23 @@ class MPC:
         # f[1]= x[1]+ np.sin(u[0])*0.01 # 坐标y
         # f[2]= x[2]+ np.sin(u[1])*0.01 # 转角theta
 
-        f[0]= x[0]+ np.cos(u[0]) # 坐标x
-        f[1]= x[1]+ np.sin(u[0]) # 坐标y
-        f[2]= x[2]+ np.sin(u[1]) # 转角theta
+        f[0]= x[0]+ np.cos(x[2])*u[0] # 坐标x
+        f[1]= x[1]+ np.sin(x[2])*u[0] # 坐标y
+        f[2]= x[2]+ u[1] # 转角theta
 
         return f
-
-    ##------------定义运动学函数：用网络进行运动学估计------------
-    #def f(self,x,u):
-    #    #f = 2*x  # 实际函数可能需要改
-    #    print("f(self,x,u) x")
-    #    print(x)
-
-    #    print("f(self,x,u) u")
-    #    print(u)
-
-    #    #将X和u合并产生
-    #    input= np.hstack((x,u))
-    #    input_torch = torch.from_numpy(input)
-        
-    #    print("f(self,x,u) input")
-    #    print(input_torch.float())
-
-    #    #调用网络进行运动学估计
-    #    output = self.reload(input_torch.float())
-
-    #    print("f(self,x,u) output")
-    #    print(output)
-
-    #    return output.detach().numpy() 
 
     # 1.输入变量符合运动学方程 （等式）
     #def constraint1(self,*args):
     def constraint1(self,*args):
         #数据unpack
-        x,u,num = args
+        x_plus_u,num = args
         
-        #将x来reshape成（10,3）矩阵
-        x=np.reshape(x,(self.prediction_horizon,self.state_number) )
-
-        print("u")
-        print(u)
+        #将x_plus_u来reshape成（10,5）矩阵：状态量+控制量
+        x_plus_u=np.reshape(x_plus_u,(self.prediction_horizon,self.state_number+self.input_number)) 
 
         #对u的数据处理
-        return self.f(x[num,:],u) - x[num+1,:]
+        return self.f(x_plus_u[num,0:3],x_plus_u[num,3:5]) - x_plus_u[num+1,0:3]
 
 
     # 2.初始状态达到理想数值(等式）
@@ -209,17 +171,23 @@ class MPC:
         #取数据的size
         lenth = len(x_plus_u[:,0]) # 将prediction horizon取出来
         
-        return x_plus_u[lenth-1,0:3] - x_d[lenth-1,:] # 最终的数值要为零
+        return self.final_error - np.sum(np.fabs(x_plus_u[lenth-1,0:3] - x_d[lenth-1,:]))  # 最终的数值要为零
 
     # 4.u的转角只能是给定的数值(等式）
     def constraint4(self,*args):
         #数据unpack
-        x,u = args
+        x_plus_u,num = args
+        
+        #将x来reshape成（10,5）矩阵：状态量+控制量
+        x_plus_u=np.reshape(x_plus_u,(self.prediction_horizon,self.state_number+self.input_number) )
 
-        print("w")
-        print(u[1])
+        #提取u
+        u = x_plus_u[:,3:5]
+        
+        #reshape u 
+        u=np.reshape(u,(1,self.prediction_horizon*self.input_number))
 
-        return u[1]-(np.pi/12) 
+        return u[0,num]-int(u[0,num])
 
 
     #------------开始进行优化------------
@@ -228,22 +196,23 @@ class MPC:
         # 定义空的list 
         cons= []
 
-        # # 1.定义运动学约束
-        # for num in range(self.prediction_horizon-1):
-        #     con = {'type': 'eq', 'fun': self.constraint1,'args':(self.u[num,:],num)}
-        #     cons.append (con)
+        # 1.定义运动学约束
+        for num in range(self.prediction_horizon-1):
+            print("num",num)
+            con = {'type': 'eq', 'fun': self.constraint1,'args':(num,)}
+            cons.append (con)
         
         # 2.定义初始状态约束
         con10 = {'type': 'eq', 'fun': self.constraint2,'args':(self.x_plus_u_init,)} # 初始状态包括x状态和控制量
         cons.append(con10)
 
-        # 3.定义最终状态约束
-        con11 = {'type': 'eq', 'fun': self.constraint3,'args':(self.x_d,)} 
-        cons.append(con11)
+        # # 3.定义最终状态约束
+        # con11 = {'type': 'ineq', 'fun': self.constraint3,'args':(self.x_d,)} 
+        # cons.append(con11)
 
-        # # 4.定义转角约束
-        # for num in range(self.prediction_horizon):
-        #     con12 = {'type': 'eq', 'fun': self.constraint4,'args':(self.u[num,:],)} 
+        # # 4.定义控制约束
+        # for num in range(self.prediction_horizon*self.input_number):
+        #     con12 = {'type': 'eq', 'fun': self.constraint4,'args':(num,)} 
         #     cons.append(con12)
 
         # 总约束：cons
@@ -292,8 +261,10 @@ class MPC:
         # print("self.x_init")
         # print(self.x_init)
 
-        # print("u最终")
-        # print(self.u)
+        print("u最终")
+        print(u_optimize)
 
         #time.sleep(100)
         return x_optimize,u_optimize #将控制数据和状态估计返回
+
+    

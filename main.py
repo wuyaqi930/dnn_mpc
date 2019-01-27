@@ -4,14 +4,19 @@ import rospy
 #-----------personal------------
 import controller
 
+import mpc #导入相关的文件
 
+import mpc_line 
 
 if __name__ == '__main__':
-    #init
-    data = controller.control()
+    # #init
+    # data = controller.control()
 
-    #receive data
-    data.data_receive()
+    # #receive data
+    # data.data_receive()
 
+    data = mpc_line.MPC()
+
+    data.optimizer()
     
 
