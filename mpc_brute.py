@@ -4,12 +4,18 @@
 import numpy as np  
 from scipy.optimize import brute 
 import itertools
+import time
 
 #-------------导入ros有关的package-------------
 import rospy
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Twist 
+from std_msgs.msg import Int16
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
+
+#-------------初始化全局变量-------------
+is_done=Int16()
+is_done.data=0
 
 #-------------定义一个模型预测的类型-------------
 class MPC:
@@ -162,6 +168,11 @@ class MPC:
         
         return control
 
+    #发送twist：一直发指令，直到一次运动结束之后就不发指令
+    def callback_2(self,data): 
+        #接受数据
+        is_done.data= data.data #去data当中的数据
+
     #将控制量发布出去
     def control_publish(self,control):
         #初始化node
@@ -174,21 +185,20 @@ class MPC:
         twist = Twist()
 
         #将所有数据发送出去
-        for num in range(len(control)):
+        for i in range(5): #为了防止没有收到信息，连续发送五次控制命令
             # 给twist赋值（已经没有了四元素的含义了）
-            twist.linear.x = np.asarray(control)[num,0] #线速度
+            twist.linear.x = np.asarray(control)[0,0] #线速度
             twist.linear.y = 0.0
             twist.linear.z = 0.0
 
             twist.angular.x = 0.0 
             twist.angular.y = 0.0
-            twist.angular.z = np.asarray(control)[num,1] #角速度
+            twist.angular.z = np.asarray(control)[0,1] #角速度
 
             #发送twist
             pub.publish(twist) #将数据发送出去
 
             print("twist",twist) 
-
 
     #优化函数
     def optimize(self):
@@ -202,7 +212,29 @@ class MPC:
         control = self.result_to_control(result)
 
         #将控制量发布出去
-        self.control_publish(control)
+
+        #初始化subscriber 
+        rospy.Subscriber("is_done", Int16, self.callback_2)
+
+        #初始化发布序列
+        self.num=0
+
+        #不断进行循环
+        while 1:
+            #接受到数据才执行
+            if(is_done.data==1 and self.num<10):
+                #发送制定序列的控制命令
+                self.control_publish(control[self.num])
+                
+                #发送下一个
+                self.num = self.num+1
+
+                #将is_down复位
+                print("is_done已重置")
+                is_done.data = 0
+
+            #延迟一下
+            time.sleep(1)
 
         return result
     
