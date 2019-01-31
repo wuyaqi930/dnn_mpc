@@ -1,7 +1,5 @@
 #coding=utf-8
-#coding=utf-8
 #-------------导入相关安装包-------------
-#import torch
 import numpy as np
 from scipy.optimize import minimize
 #import matplotlib.pyplot as plt
@@ -12,6 +10,7 @@ import datetime
 #-------------导入ros的package-------------
 import rospy
 from nav_msgs.msg import Odometry #接收里程计信息
+from geometry_msgs.msg import Twist #
 from tf.transformations import euler_from_quaternion, quaternion_from_euler #将接收到的四元数转化为转角信息
 
 # 定义一个模型预测控制的类 
@@ -24,8 +23,8 @@ class MPC:
     #------------初始化相关数值------------
         self.quaternion = np.zeros(4) #四元数
         self.euler_angle = np.zeros(3) #转角信息
-        self.position = np.zeros(3) #位置信息
-        self.period = 300 #走一条直线花的时间
+        self.positions = np.zeros(3) #位置信息
+        self.line_finish = 19 #走一条直线花的时间
         self.u = np.zeros(2)
         self.error = 0 #和理想轨迹的误差大小
 
@@ -54,9 +53,9 @@ class MPC:
     
     def position(self,data):
         #获取此时的position
-        self.position[0] = data.pose.pose.position.x #坐标
-        self.position[1] = data.pose.pose.position.y #坐标
-        self.position[2] = data.pose.pose.position.z #坐标
+        self.positions[0] = data.pose.pose.position.x #x坐标
+        self.positions[1] = data.pose.pose.position.y #y坐标
+        self.positions[2] = data.pose.pose.position.z #z坐标
 
     def control(self):
         #orientation的四元数转化为欧拉角
@@ -65,23 +64,21 @@ class MPC:
         self.yaw = self.euler_angle[2] #获取yaw角度
         
         #对应的轨迹
-        #获取现在的时间
-        self.timenow = datetime.datetime.now()
+        #计算实时坐标
+        self.position_x = self.positions[0] #x坐标数值
+        self.position_y = self.positions[1] #y坐标数值
 
-        #计算间隔时间
-        self.delta_time = (self.timenow - self.starttime).total_seconds()
-
-        if self.delta_time < self.period: #第一条直线
+        if self.position_x < self.line_finish: #第一条直线
             #--------有误差时--------
             #计算和理想轨迹的误差
             # self.error = np.abs(self.position[1])
-            self.error = self.position[1]
+            self.error = self.positions[1]
 
             #矫正误差
             if self.error > 0.2: #在左边
                 #转到合适角度
-                if self.yaw > (-np.pi/4) or self.yaw < (-np.pi/2): # 这个判断有点问题
-                    self.turn(self.position[1]) # y = self.position[1]
+                if (-np.pi/4) < self.yaw < (np.pi) or (-np.pi) < self.yaw < (-np.pi/2): # 这个判断有点问题
+                    self.turn(self.positions[1]) # y = self.position[1]
                 
                 #直线运动(减小误差)
                 if self.turn_flag ==0: #没发生转动就直行
@@ -89,8 +86,8 @@ class MPC:
 
             elif self.error < -0.2 : #在右边
                 #转到合适角度
-                if self.yaw > (np.pi/2) or self.yaw < (np.pi/4):
-                    self.turn(self.position[1])
+                if (np.pi/2) < self.yaw < (np.pi) or (-np.pi) <self.yaw < (np.pi/4):
+                    self.turn(self.positions[1])
 
                 #直线运动(减小误差)
                 if self.turn_flag ==0: #没发生转动就直行
@@ -98,25 +95,70 @@ class MPC:
             
             #--------没误差时--------
             if self.turn_flag == 0 and self.straight_flag == 0: #之前没发生直行或者转动才执行
+                #1. 转角修正
+                if not (-(np.pi)/10 < self.yaw < (np.pi)/10) :#要修正
+                    self.turn_straight(self.yaw, 1) 
+
+                #2. 直线前行
+                if self.turn_flag_line == 0: #没发生转动就直行
+                    #直线运动(减小误差)
+                    self.go_straight()
+
+            #--------flag重置--------
+            # 1.有误差的fiag 
+            self.turn_flag = 0 #所有程序执行完之后重置flag
+            self.straight_flag = 0
+
+            # 2.没误差的flag
+            self.turn_flag_line = 0
+
+        elif self.position_x >= self.line_finish: #第二条直线
+            #--------有误差时--------
+            #计算和理想轨迹的误差
+            # self.error = np.abs(self.position[1])
+            self.error = self.position_x- 20 #20是一条直线的长度
+
+            #矫正误差
+            if self.error > 0.2: #在上边
+                #转到合适角度
+                if (-np.pi) < self.yaw < 0 or 0 < self.yaw < (3*np.pi/4): # 这个判断有点问题
+                    self.turn(self.position_x) # y = self.position[1]
+                
                 #直线运动(减小误差)
-                self.go_straight()
+                if self.turn_flag ==0: #没发生转动就直行
+                    self.go_straight() #！！！：是否来得及执行
+
+            elif self.error < -0.2 : #在下边
+                #转到合适角度
+                if (-np.pi)< self.yaw <0 or (np.pi/4) < self.yaw < (np.pi):
+                    self.turn(self.position_x)
+
+                #直线运动(减小误差)
+                if self.turn_flag ==0: #没发生转动就直行
+                    self.go_straight() #！！！：是否来得及执行
+            
+            #--------没误差时--------
+            if self.turn_flag == 0 and self.straight_flag == 0: #之前没发生直行或者转动才执行
+                #1. 转角修正
+                if not (2*(np.pi)/5 < self.yaw < 3*(np.pi)/5) :#要修正
+                    self.turn_straight(self.yaw, 2) 
+
+                #2. 直线前行
+                if self.turn_flag_line == 0: #没发生转动就直行
+                    #直线运动(减小误差)
+                    self.go_straight()
 
             #--------flag重置--------
             self.turn_flag = 0 #所有程序执行完之后重置flag
             self.straight_flag = 0
-
-        elif self.period <= self.delta_time < 2*self.period: #第二条直线
         
-        elif 2*self.period <= self.delta_time < 3*self.period #第三条直线
 
-        elif 3*self.period <= self.delta_time < 4*self.period #第四条直线
-
-    #转弯
+    #纵向-转弯
     def turn(self,position_y):
 
         if position_y > 0 :#在左边
             #判断此时的转角
-            if self.yaw > (-np.pi/4): #顺时针转动
+            if (-np.pi/4) < self.yaw < (np.pi): #顺时针转动
                 #定义线速度角速度
                 self.u[0] = 0 #线速度为零
                 self.u[1] = 1 #角速度为1，右转一圈
@@ -126,7 +168,7 @@ class MPC:
 
                 #表明数据已发送
                 self.turn_flag = 1
-            elif self.yaw <(-np.pi/2): #逆时针转动
+            elif (-np.pi) < self.yaw < (-np.pi/2): #逆时针转动
                 #定义线速度角速度
                 self.u[0] = 0 #线速度为零
                 self.u[1] = -1 #角速度为1，左转一圈
@@ -138,7 +180,7 @@ class MPC:
                 self.turn_flag = 1
         elif position_y < 0:#在右边
             #判断此时的转角
-            if self.yaw > (np.pi/2): #顺时针转动
+            if (np.pi/2) < self.yaw < (np.pi): #顺时针转动
                 #定义线速度角速度
                 self.u[0] = 0 #线速度为零
                 self.u[1] = 1 #角速度为1，右转一圈
@@ -148,7 +190,7 @@ class MPC:
 
                 #表明数据已发送
                 self.turn_flag = 1
-            elif self.yaw <(np.pi/4): #逆时针转动
+            elif (-np.pi) <self.yaw < (np.pi/4): #逆时针转动
                 #定义线速度角速度
                 self.u[0] = 0 #线速度为零
                 self.u[1] = -1 #角速度为1，左转一圈
@@ -178,8 +220,6 @@ class MPC:
         #发送twist
         pub.publish(twist) #将数据发送出去
 
-    
-
     #直线运动
     def go_straight(self):
         #定义线速度角速度
@@ -192,7 +232,110 @@ class MPC:
         #表明数据已发送
         self.straight_flag = 1
 
+    #横向-转弯
+    def turn_2(self,position_x):
+
+        if position_x > 20 :#在上边
+            #判断此时的转角
+            if (-np.pi) < self.yaw < 0: #顺时针转动
+                #定义线速度角速度
+                self.u[0] = 0 #线速度为零
+                self.u[1] = 1 #角速度为1，右转一圈
+
+                #发送控制量
+                self.data_publish(self.u)
+
+                #表明数据已发送
+                self.turn_flag = 1
+            elif 0 < self.yaw <(3*np.pi/4): #逆时针转动
+                #定义线速度角速度
+                self.u[0] = 0 #线速度为零
+                self.u[1] = -1 #角速度为1，左转一圈
+
+                #发送控制量
+                self.data_publish(self.u)
+
+                #表明数据已发送
+                self.turn_flag = 1
+
+        elif position_x < 20:#在下边
+            #判断此时的转角
+            if (np.pi/4) < self.yaw < (np.pi): #顺时针转动
+                #定义线速度角速度
+                self.u[0] = 0 #线速度为零
+                self.u[1] = 1 #角速度为1，右转一圈
+
+                #发送控制量
+                self.data_publish(self.u)
+
+                #表明数据已发送
+                self.turn_flag = 1
+            elif (-np.pi) < self.yaw <0: #逆时针转动
+                #定义线速度角速度
+                self.u[0] = 0 #线速度为零
+                self.u[1] = -1 #角速度为1，左转一圈
+
+                #发送控制量
+                self.data_publish(self.u)
+
+                #表明数据已发送
+                self.turn_flag = 1
+
+    #直线运动--转角修正
+    def turn_straight(self,yaw,num):
+        #第一条直线
+        if num == 1 :
+            if (np.pi/10) < yaw <(np.pi) : #顺势针转动 
+                #定义线速度角速度
+                self.u[0] = 0 #线速度为零
+                self.u[1] = 1 #角速度为1，右转一圈
+
+                #发送控制量
+                self.data_publish(self.u)
+
+                #表明数据已发送
+                self.turn_flag_line = 1
+
+            if (-np.pi) < yaw <(-np.pi/10) : #逆时针转动 
+                #定义线速度角速度
+                self.u[0] = 0 #线速度为零
+                self.u[1] = -1 #角速度为1，右转一圈
+
+                #发送控制量
+                self.data_publish(self.u)
+
+                #表明数据已发送
+                self.turn_flag_line = 1
+
+        #第二条直线
+        if num == 2 :
+            if (-np.pi) < yaw <(-np.pi/2) or (3*np.pi/5) < (np.pi): #顺时针转动 
+                #定义线速度角速度
+                self.u[0] = 0 #线速度为零
+                self.u[1] = 1 #角速度为1，右转一圈
+
+                #发送控制量
+                self.data_publish(self.u)
+
+                #表明数据已发送
+                self.turn_flag_line = 1
+
+            if (-np.pi/2) < yaw <(2*np.pi/5) : #逆势针转动 
+                #定义线速度角速度
+                self.u[0] = 0 #线速度为零
+                self.u[1] = -1 #角速度为1，右转一圈
+
+                #发送控制量
+                self.data_publish(self.u)
+
+                #表明数据已发送
+                self.turn_flag_line = 1
     
+    
+
+
+
+
     
         
     # # 优化函数

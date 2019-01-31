@@ -35,6 +35,8 @@ class control:
         self.w_d = np.pi/10 #初始化转动角速度(完成时间：5s）
         self.line = 20 #初始化直线轨迹长度
 
+        self.positions = np.zeros(3) #位置信息
+
         # self.x_d = np.zeros(3) #初始化理想轨迹
         # self.x_init = np.zeros(3) #初始化实际轨迹
 
@@ -119,6 +121,31 @@ class control:
 
         return x_d_once
 
+    #判断是mpc_line还是mpc_target
+    def mpc_desicion(self,data):
+        #获取此时的position
+        self.positions[0] = data.pose.pose.position.x #x坐标
+        self.positions[1] = data.pose.pose.position.y #y坐标
+        self.positions[2] = data.pose.pose.position.z #z坐标
+        
+        #定义坐标
+        x = self.positions[0]
+        y = self.positions[1]
+
+        #判断此时的位置(使用经验值)
+        if 19.5 < x < 20.5 and 19.5 < y < 20.5 : # mpc-target 
+            self.is_mpc_line==0
+            self.is_mpc_target==1
+        else : # mpc-line
+            self.is_mpc_line==1
+            self.is_mpc_target==0
+
+    # 将之前的数据clear掉
+    def clear(self):
+        #flag的reset 
+        self.is_mpc_line=0
+        self.is_mpc_target=0
+
     #定义回调函数
     def callback(self,data):
         #初始化time(每30帧取1帧作为状态数据）
@@ -129,36 +156,29 @@ class control:
             x_init = self.x_init 
 
             #2.判断是mpc_line 还是 mpc_target 
-
-
+            self.mpc_desicion(data) # 根据经验值来判断
 
             #3.将data丢给MPC计算
             #3.1 直线版本mpc
             if self.is_mpc_line==1:
                 model_predict=mpc_line.MPC(data) #提示：x_init,x_d还没有
-                model_predict.optimizer 
+                model_predict.optimizer()
 
             #3.2 任务版本mpc
-            if self.is_mpc_target==1:
+            if self.is_mpc_line==1:
                 model_predict = mpc.MPC(x,x_init,x_d,self.prediction_horizon,self.state_number,self.input_number) #提示：x_init,x_d还没有
 
                 #3.2.1求解MPC（控制量生成）
                 self.x,self.u = model_predict.optimize() #将求解得出的实际状态量和实际控制量赋值给self.x,self.u
 
-            # # 调试代码：测试MPC计算
-            # print("mpc计算成功")
-
-            # print("self.x")
-            # print(self.x)
-            # print("self.u")
-            # print(self.u)
-
-
-            # #将控制信号publish出去
-            # self.data_publish(self.u) # self.u是控制量
+            #4. 将之前的flag来reset
+            self.clear()
 
             self.time = self.time+1 # 自增操作
         else:
+            #将之前的flag来reset
+            self.clear()
+
             self.time = self.time+1 # 自增操作
         
 
